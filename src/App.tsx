@@ -1,8 +1,8 @@
+import HomePage from './pages/HomePage';
+
 function App() {
   return (
-    <div className="bg-red-500 text-white text-5xl min-h-screen flex items-center justify-center">
-      Tailwind Test
-    </div>
+    <HomePage />
   );
 }
 

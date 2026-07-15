@@ -1,5 +1,7 @@
 import Navbar from '../components/Navbar';
 import OrderBoard from '../components/OrderBoard';
+import InventoryStatus from '../components/InventoryStatus';
+import BillingSystem from '../components/BillingSystem'; // 1. Imported our new billing system!
 
 function HomePage() {
   return (
@@ -15,8 +17,12 @@ function HomePage() {
             System is live. Select a module from the navigation to begin managing orders, inventory, or billing.
           </p>
           
-          {/* We swapped the placeholder for the real OrderBoard! */}
+          {/* Live tracking blocks */}
           <OrderBoard />
+          <InventoryStatus />
+          
+          {/* 2. Added the Billing block right here */}
+          <BillingSystem />
           
         </div>
       </main>
