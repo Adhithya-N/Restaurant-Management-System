@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Python & Database Ignores
+backend/venv/
+backend/canteen.db
