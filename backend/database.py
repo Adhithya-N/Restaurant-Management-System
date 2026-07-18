@@ -3,7 +3,8 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # This creates a local file called 'canteen.db' to store everything
-SQLALCHEMY_DATABASE_URL = "sqlite:///./canteen.db"
+SQLALCHEMY_DATABASE_URL = "sqlite:///./canteen_v3.db"
+
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
