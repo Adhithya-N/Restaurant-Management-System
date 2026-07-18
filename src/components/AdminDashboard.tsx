@@ -9,9 +9,10 @@ export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [activeTab, setActiveTab] = useState<'analytics' | 'menu'>('analytics');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   // Form States
-  const [newItem, setNewItem] = useState({ name: '', price: '', category: 'Main Course', image: '', description: '' });
+  const [newItem, setNewItem] = useState({ name: '', price: '', category: 'Main Course', image: '', description: 'Delicious item' });
   const [editingImageId, setEditingImageId] = useState<number | null>(null);
   const [newImageUrl, setNewImageUrl] = useState('');
 
@@ -19,12 +20,24 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     try {
       const resAnalytics = await fetch('http://localhost:8000/api/admin/analytics');
-      if (resAnalytics.ok) setAnalytics(await resAnalytics.json());
+      let analyticsData: Analytics | null = null;
+      if (resAnalytics.ok) {
+        analyticsData = await resAnalytics.json();
+      }
 
       const resMenu = await fetch('http://localhost:8000/api/admin/menu');
-      if (resMenu.ok) setMenuItems(await resMenu.json());
-    } catch (error) {
-      console.error("Fetch error:", error);
+      let menuData: MenuItem[] = [];
+      if (resMenu.ok) {
+        menuData = await resMenu.json();
+      }
+
+      // Update states together cleanly
+      if (analyticsData) setAnalytics(analyticsData);
+      if (menuData) setMenuItems(menuData);
+    } catch (_error) {
+      console.error("Fetch error caught in dashboard loop.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -37,28 +50,41 @@ export default function AdminDashboard() {
   // Handlers
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch('http://localhost:8000/api/admin/menu', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...newItem, price: Number(newItem.price) })
-    });
-    setNewItem({ name: '', price: '', category: 'Main Course', image: '', description: '' });
-    fetchData();
+    try {
+      await fetch('http://localhost:8000/api/admin/menu/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...newItem, price: Number(newItem.price) })
+      });
+      setNewItem({ name: '', price: '', category: 'Main Course', image: '', description: 'Delicious item' });
+      fetchData();
+    } catch (_error) {
+      console.error("Failed to add menu item");
+    }
   };
 
   const handleUpdateImage = async (id: number) => {
-    await fetch(`http://localhost:8000/api/admin/menu/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: newImageUrl })
-    });
-    setEditingImageId(null);
-    setNewImageUrl('');
-    fetchData();
+    try {
+      await fetch(`http://localhost:8000/api/admin/menu/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: newImageUrl })
+      });
+      setEditingImageId(null);
+      setNewImageUrl('');
+      fetchData();
+    } catch (_error) {
+      console.error("Failed to update image");
+    }
   };
 
-  if (!analytics) return <div className="p-8 text-center">Loading dashboard...</div>;
-  const maxRevenue = Math.max(...analytics.chart_data.map(d => d.revenue), 1);
+  if (isLoading || !analytics) {
+    return <div className="p-8 text-center text-gray-500 font-bold">Loading system dashboard analytics...</div>;
+  }
+
+  // Safe check extraction for Chart calculations
+  const chartDataList = analytics?.chart_data || [];
+  const maxRevenue = chartDataList.length > 0 ? Math.max(...chartDataList.map(d => d.revenue), 1) : 1;
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 mt-12">
@@ -96,7 +122,7 @@ export default function AdminDashboard() {
           <div>
             <h3 className="text-lg font-bold text-gray-700 mb-6">Revenue Trend</h3>
             <div className="flex items-end gap-4 h-48 mt-4">
-              {analytics.chart_data.map((day, idx) => (
+              {chartDataList.map((day, idx) => (
                 <div key={idx} className="flex-1 flex flex-col items-center gap-2 group">
                   <div className="w-full bg-indigo-500 rounded-t-md relative transition-all" style={{ height: `${(day.revenue / maxRevenue) * 100}%` }}>
                     <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs py-1 px-2 rounded">₹{Math.round(day.revenue)}</div>

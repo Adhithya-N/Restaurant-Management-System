@@ -14,11 +14,16 @@ interface CartItem extends MenuItem {
   quantity: number;
 }
 
+interface AIAnalysis {
+  recommendation?: string;
+  alert?: string;
+}
+
 export default function CanteenPOS() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState<{ recommendation?: string; alert?: string } | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
@@ -51,27 +56,29 @@ export default function CanteenPOS() {
   const handleCheckoutClick = async () => {
     setIsCheckoutOpen(true);
     setIsAnalyzing(true);
+    setAiAnalysis(null);
     try {
       const response = await fetch('http://127.0.0.1:8000/api/checkout/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: cart.map(i => i.name), total: cartTotal })
       });
-      if (response.ok) setAiAnalysis(await response.json());
+      if (response.ok) {
+        const data = await response.json();
+        setAiAnalysis(data);
+      }
     } catch (error) {
       console.error("AI Analysis failed:", error);
     } finally {
       setIsAnalyzing(false);
     }
   };
-const placeOrder = async () => {
+
+  const placeOrder = async () => {
     try {
-      // Ensure this matches your backend @app.post("/api/orders") exactly
       const response = await fetch('http://127.0.0.1:8000/api/orders', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json' 
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           student_name: "Adhithya N", 
           total_amount: cartTotal,
@@ -80,25 +87,24 @@ const placeOrder = async () => {
       });
       
       if (!response.ok) {
-        // This will print the actual error if the backend rejects the request
         const errorData = await response.json();
-        console.error("Backend Error:", errorData);
-        alert(`Error: ${JSON.stringify(errorData)}`);
+        alert(`Error: ${errorData.detail || "Failed to place order"}`);
         return;
       }
 
       setCart([]);
       setIsCheckoutOpen(false);
-      setAiAnalysis(null);
-    } catch (error) {
-      console.error("Fetch failed:", error);
-      alert("Network error: Check if your Python server is running on port 8000!");
+      alert("Order placed successfully!");
+   }catch (error) {
+      console.error("Caught error:", error); // This uses the variable, so the error goes away
+      alert("Network error: Check if Python backend is running on port 8000");
     }
-};
+  };
 
   return (
     <div className="bg-gray-50 p-8 min-h-screen">
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Menu Grid */}
         <div className="lg:col-span-2">
           <h2 className="text-3xl font-black text-gray-900 mb-6">🍽️ Live Menu</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -114,7 +120,9 @@ const placeOrder = async () => {
             ))}
           </div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit">
+
+        {/* Cart Sidebar */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit sticky top-8">
           <h2 className="text-2xl font-bold mb-6">🛒 Your Cart</h2>
           <div className="space-y-4 mb-6">
             {cart.map((item, idx) => (
@@ -124,14 +132,21 @@ const placeOrder = async () => {
               </div>
             ))}
           </div>
-          <button onClick={handleCheckoutClick} disabled={cart.length === 0} className="w-full bg-green-500 text-white font-black py-4 rounded-xl">Checkout</button>
+          <button onClick={handleCheckoutClick} disabled={cart.length === 0} className="w-full bg-green-500 text-white font-black py-4 rounded-xl disabled:bg-gray-300">Checkout</button>
         </div>
       </div>
 
+      {/* AI Modal */}
       {isCheckoutOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white p-8 rounded-2xl max-w-md w-full">
             <h2 className="text-2xl font-black mb-6">Review Order</h2>
+            {isAnalyzing ? <p>Agents analyzing...</p> : (
+              <div className="mb-6 space-y-2">
+                {aiAnalysis?.recommendation && <p className="text-indigo-600 font-bold">{aiAnalysis.recommendation}</p>}
+                {aiAnalysis?.alert && <p className="text-red-600 font-bold">{aiAnalysis.alert}</p>}
+              </div>
+            )}
             <button onClick={placeOrder} className="w-full bg-black text-white font-black py-4 rounded-xl">Confirm & Pay ₹{cartTotal}</button>
           </div>
         </div>
