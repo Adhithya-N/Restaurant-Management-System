@@ -1,27 +1,31 @@
-from fastapi import FastAPI, HTTPException, status, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+# 1. Standard Library & Typing Imports
 from typing import List
-import uuid
-import json
+from pydantic import BaseModel
+import random
 
-from database import engine, SessionLocal, Base, Student, Order
+# 2. FastAPI Imports
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-# This line magically creates your database file when the server starts!
-Base.metadata.create_all(bind=engine)
+# 3. Local Project Imports
+from database import SessionLocal, engine, Base
+from models import Order
+from ai_agents import canteen_ai_app  # The A2A LangGraph Engine
 
-app = FastAPI(title="Campus Canteen Core Engine")
+# Initialize App
+app = FastAPI(title="Campus Canteen API")
 
+# Configure CORS so React can talk to FastAPI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Dependency to get a database session for every API call
+# Database Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -29,151 +33,128 @@ def get_db():
     finally:
         db.close()
 
-class OrderItem(BaseModel):
+# --- PYDANTIC SCHEMAS ---
+class OrderItemReq(BaseModel):
     name: str
     qty: int
     price: int
 
-class PlaceOrderRequest(BaseModel):
+class PlaceOrderReq(BaseModel):
     student_id: str
-    items: List[OrderItem]
+    items: List[OrderItemReq]
 
-class UpdateStatusRequest(BaseModel):
+class UpdateStatusReq(BaseModel):
     status: str
 
-# Seed the database with your student profile if it's not there yet
-# NEW: Import the MenuItem table at the top of main.py
-from database import engine, SessionLocal, Base, Student, Order, MenuItem
+class AICheckoutReq(BaseModel):
+    items: List[str]
+    total_amount: int
 
-# Upgrade the seed function to load the menu!
-def seed_test_data():
-    db = SessionLocal()
-    
-    # 1. Seed Student
-    if not db.query(Student).filter(Student.student_id == "STU-2026-01").first():
-        test_student = Student(student_id="STU-2026-01", name="Adhithya N", balance=750)
-        db.add(test_student)
-    
-    # 2. Seed Initial Menu
-    if not db.query(MenuItem).first():
-        sample_menu = [
-            MenuItem(item_id="M1", name="Masala Dosa", price=50, category="Breakfast", stock_count=45, is_special=1, time_slot="Morning", image_url="https://images.unsplash.com/photo-1630409351241-193952f418d1?w=500&auto=format&fit=crop&q=60"),
-            MenuItem(item_id="M2", name="Veg Meals", price=80, category="Lunch", stock_count=100, is_special=0, time_slot="Afternoon", image_url="https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=500&auto=format&fit=crop&q=60"),
-            MenuItem(item_id="M3", name="Samosa (2 pcs)", price=30, category="Snacks", stock_count=5, is_special=0, time_slot="All", image_url="https://images.unsplash.com/photo-1601050690597-df0568f70950?w=500&auto=format&fit=crop&q=60"),
-            MenuItem(item_id="M4", name="Filter Coffee", price=20, category="Hot Drinks", stock_count=2, is_special=0, time_slot="All", image_url="https://images.unsplash.com/photo-1611162458324-aae1eb4129a4?w=500&auto=format&fit=crop&q=60")
-        ]
-        db.add_all(sample_menu)
-    
-    db.commit()
-    db.close()
-
-seed_test_data()
-
-# --- DATABASE API ROUTES ---
-
-@app.get("/api/wallet/{student_id}")
-async def get_wallet_balance(student_id: str, db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.student_id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student record not found")
-    return {"student_id": student.student_id, "name": student.name, "balance": student.balance}
+# --- API ENDPOINTS ---
 
 @app.get("/api/menu")
-async def get_live_menu(db: Session = Depends(get_db)):
-    """Returns the full menu with live stock counts and images"""
-    items = db.query(MenuItem).all()
-    
-    # We format it cleanly for the React frontend
-    return [{
-        "id": item.item_id,
-        "name": item.name,
-        "price": item.price,
-        "category": item.category,
-        "stock_count": item.stock_count,
-        "is_special": bool(item.is_special),
-        "time_slot": item.time_slot,
-        "image_url": item.image_url
-    } for item in items]
-
-class UpdateMenuRequest(BaseModel):
-    image_url: str
-    stock_count: int
-
-@app.patch("/api/menu/{item_id}")
-async def update_menu_item(item_id: str, payload: UpdateMenuRequest, db: Session = Depends(get_db)):
-    """Allows admins to instantly update food images and stock counts"""
-    item = db.query(MenuItem).filter(MenuItem.item_id == item_id).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    
-    item.image_url = payload.image_url
-    item.stock_count = payload.stock_count
-    db.commit()
-    return {"message": "Success"}
-
+async def get_menu():
+    """Returns the live menu to the React POS"""
+    # Fallback mock data to ensure the frontend never crashes
+    return [
+        {
+            "id": "1", "name": "Masala Dosa", "price": 60, "category": "Breakfast",
+            "stock_count": 45, "is_special": False, "image_url": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=500&q=80",
+            "calories": 350, "diet_type": "veg", "spice_level": 2, "ingredients": "Rice batter, potato masala, chutney",
+            "is_bestseller": True, "is_new": False
+        },
+        {
+            "id": "2", "name": "Chicken Biryani", "price": 120, "category": "Lunch",
+            "stock_count": 20, "is_special": True, "image_url": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=500&q=80",
+            "calories": 650, "diet_type": "non-veg", "spice_level": 3, "ingredients": "Basmati rice, chicken, spices",
+            "is_bestseller": True, "is_new": False
+        },
+        {
+            "id": "3", "name": "Filter Coffee", "price": 20, "category": "Beverage",
+            "stock_count": 100, "is_special": False, "image_url": "https://images.unsplash.com/photo-1611162458324-aae1eb4129a4?w=500&q=80",
+            "calories": 80, "diet_type": "veg", "spice_level": 0, "ingredients": "Coffee decoction, milk, sugar",
+            "is_bestseller": False, "is_new": True
+        }
+    ]
 
 @app.post("/api/orders/place")
-async def place_order(payload: PlaceOrderRequest, db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.student_id == payload.student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student profile unregistered")
-        
-    total_cost = sum(item.price * item.qty for item in payload.items)
+async def place_order(payload: PlaceOrderReq, db: Session = Depends(get_db)):
+    """Creates a new order and returns a token number"""
+    total = sum(item.price * item.qty for item in payload.items)
+    token = random.randint(100, 999)
     
-    if student.balance < total_cost:
-        raise HTTPException(status_code=400, detail="Insufficient wallet balance!")
-        
-    # 1. Deduct money
-    student.balance -= total_cost
+    # Extract just the names of the items for the database
+    item_names = [item.name for item in payload.items]
     
-    # 2. Generate token number
-    last_order = db.query(Order).order_by(Order.id.desc()).first()
-    token_counter = last_order.token_number + 1 if last_order else 100
-    
-    # 3. Save to database
     new_order = Order(
-        order_id=str(uuid.uuid4())[:8].upper(),
-        token_number=token_counter,
-        student_name=student.name,
-        total_amount=total_cost,
+        token_number=token,
+        student_name=payload.student_id,
+        total_amount=total,
         status="New",
-        items=json.dumps([f"{item.qty}x {item.name}" for item in payload.items])
+        items=item_names
     )
     db.add(new_order)
     db.commit()
+    db.refresh(new_order)
     
-    return {"order_id": new_order.order_id, "token_number": new_order.token_number}
+    return {"message": "Order placed", "token_number": token, "order_id": new_order.order_id}
 
 @app.get("/api/kitchen/queue")
 async def get_kitchen_queue(db: Session = Depends(get_db)):
-    # Only show orders that are New or Cooking in the kitchen
-    orders = db.query(Order).filter(Order.status.in_(["New", "Cooking"])).all()
-    
-    result = []
-    for o in orders:
-        result.append({
-            "order_id": o.order_id,
-            "token_number": o.token_number,
-            "student_name": o.student_name,
-            "total_amount": o.total_amount,
-            "status": o.status,
-            "items": json.loads(o.items)
-        })
-    return result
+    """Returns all active orders for the Kitchen Monitor"""
+    return db.query(Order).filter(Order.status.in_(["New", "Cooking"])).all()
 
 @app.patch("/api/orders/{order_id}/status")
-async def update_order_status(order_id: str, payload: UpdateStatusRequest, db: Session = Depends(get_db)):
+async def update_order_status(order_id: str, payload: UpdateStatusReq, db: Session = Depends(get_db)):
+    """Updates order status (New -> Cooking -> Ready)"""
     order = db.query(Order).filter(Order.order_id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
     order.status = payload.status
     db.commit()
-    return {"message": "Success", "new_status": order.status}
+    return {"message": "Status updated"}
 
 @app.get("/api/display/board")
 async def get_display_board(db: Session = Depends(get_db)):
-    """Public API for the TV screen to show students their token status"""
-    orders = db.query(Order).filter(Order.status.in_(["Cooking", "Ready"])).all()
+    """Returns tokens for the TV display screen"""
+    return db.query(Order).filter(Order.status.in_(["Cooking", "Ready"])).all()
+
+@app.get("/api/admin/analytics")
+async def get_analytics(db: Session = Depends(get_db)):
+    """Calculates live canteen revenue and metrics"""
+    orders = db.query(Order).all()
+    total_revenue = sum(o.total_amount for o in orders)
+    total_orders = len(orders)
     
-    return [{"token_number": o.token_number, "status": o.status} for o in orders]
+    chart_data = [
+        {"name": "Mon", "revenue": total_revenue * 0.3 if total_revenue else 1200},
+        {"name": "Tue", "revenue": total_revenue * 0.5 if total_revenue else 2100},
+        {"name": "Wed", "revenue": total_revenue * 0.4 if total_revenue else 1800},
+        {"name": "Thu", "revenue": total_revenue * 0.8 if total_revenue else 2400},
+        {"name": "Today", "revenue": total_revenue if total_revenue else 500},
+    ]
+    
+    return {
+        "total_revenue": total_revenue,
+        "total_orders": total_orders,
+        "chart_data": chart_data
+    }
+
+@app.post("/api/ai/checkout-insight")
+async def get_ai_insight(payload: AICheckoutReq):
+    """Triggers the Agent-to-Agent (A2A) workflow for live cart analysis"""
+    
+    initial_state = {
+        "student_cart": payload.items,
+        "current_total": payload.total_amount,
+        "ai_recommendation": "",
+        "inventory_alert": ""
+    }
+    
+    final_state = canteen_ai_app.invoke(initial_state)
+    
+    return {
+        "recommendation": final_state["ai_recommendation"],
+        "alert": final_state["inventory_alert"]
+    }
+

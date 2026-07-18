@@ -32,13 +32,21 @@ class Order(Base):
 # 3. The Live Menu Table
 class MenuItem(Base):
     __tablename__ = "menu_items"
+
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(String, unique=True, index=True)
     name = Column(String)
     price = Column(Integer)
-    category = Column(String)
-    stock_count = Column(Integer)
-    image_url = Column(String)
-    is_special = Column(Integer, default=0)
-    time_slot = Column(String)
+    category = Column(String)       
+    stock_count = Column(Integer)   
+    image_url = Column(String)      
+    is_special = Column(Integer, default=0) 
+    time_slot = Column(String)      
     
+    # NEW: High-End UI Data Points
+    calories = Column(Integer, default=0)
+    diet_type = Column(String, default="Veg")  # "Veg", "Non-Veg", or "Vegan"
+    spice_level = Column(Integer, default=1)   # Scale of 1 to 3
+    ingredients = Column(String, default="")   # Comma-separated list
+    is_bestseller = Column(Integer, default=0)
+    is_new = Column(Integer, default=0)

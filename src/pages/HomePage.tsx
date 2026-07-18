@@ -19,17 +19,11 @@ function HomePage() {
           </p>
         </div>
         
-        {/* 1. The Ordering System */}
-        <CanteenPOS />
-        
-        {/* 2. The TV Display */}
-        <TokenBoard />
-        
-        {/* 3. The Kitchen Staff View */}
-        <KitchenMonitor />
-        
-        {/* 4. The Secret Admin Panel */}
-        <AdminDashboard />
+        {/* MAKE SURE EACH OF THESE IS ONLY LISTED ONCE! */}
+        <div className="w-full"><CanteenPOS /></div>
+        <div className="w-full"><TokenBoard /></div>
+        <div className="w-full"><KitchenMonitor /></div>
+        <div className="w-full"><AdminDashboard /></div>
         
       </main>
     </div>

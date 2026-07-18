@@ -1,84 +1,87 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+
+interface ChartData {
+  name: string;
+  revenue: number;
+}
+
+interface Analytics {
+  total_revenue: number;
+  total_orders: number;
+  chart_data: ChartData[];
+}
 
 export default function AdminDashboard() {
-  const [menu, setMenu] = useState<any[]>([]);
+  const [data, setData] = useState<Analytics | null>(null);
 
+  const fetchAnalytics = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/admin/analytics');
+      if (response.ok) {
+        const result = await response.json();
+        setData(result);
+      }
+    } catch (error) {
+      console.error("Failed to fetch analytics:", error);
+    }
+  };
+
+  // Refresh data every 10 seconds to watch revenue grow live
   useEffect(() => {
-    fetchMenu();
+    fetchAnalytics();
+    const interval = setInterval(fetchAnalytics, 10000);
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchMenu = async () => {
-    try {
-      const res = await fetch('http://localhost:8000/api/menu');
-      if (res.ok) setMenu(await res.json());
-    } catch (error) {
-      console.error("Admin Panel offline.");
-    }
-  };
+  if (!data) return <div className="p-8 text-center text-gray-500">Loading analytics...</div>;
 
-  const updateItem = async (id: string, newUrl: string, newStock: number) => {
-    try {
-      await fetch(`http://localhost:8000/api/menu/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: newUrl, stock_count: newStock })
-      });
-      alert("✅ Item Updated Successfully!");
-      fetchMenu(); // Refresh the panel to show the new image
-    } catch (error) {
-      alert("Failed to update item.");
-    }
-  };
+  // Calculate the max value for our custom CSS bar chart
+  const maxRevenue = Math.max(...data.chart_data.map(d => d.revenue), 1);
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 mt-8">
-      <div className="mb-6 border-b border-gray-200 pb-4">
-        <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2">
-          ⚙️ Admin Control Center
-        </h2>
-        <p className="text-gray-500 text-sm mt-1">Live database management</p>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 mt-12">
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-2xl font-bold text-gray-800">📈 Live Canteen Analytics</h2>
+        <span className="flex items-center gap-2 text-sm font-medium text-green-600 bg-green-50 px-3 py-1 rounded-full">
+          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+          Live Server Connection
+        </span>
       </div>
 
-      <div className="space-y-4">
-        {menu.map(item => (
-          <div key={item.id} className="flex flex-col md:flex-row gap-4 items-center bg-gray-50 border border-gray-200 p-4 rounded-xl">
-            {/* Current Image Preview */}
-            <img src={item.image_url} alt={item.name} className="w-24 h-24 object-cover rounded-lg shadow-sm bg-gray-200" />
-            
-            <div className="flex-1 w-full">
-              <p className="font-black text-gray-800 text-lg">{item.name}</p>
-              <label className="text-xs font-bold text-gray-500 uppercase">Image URL</label>
-              <input 
-                type="text" 
-                defaultValue={item.image_url} 
-                id={`url-${item.id}`}
-                className="w-full text-sm border border-gray-300 p-2 mt-1 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                placeholder="Paste new image URL here..."
-              />
-            </div>
-            
-            <div className="w-full md:w-auto">
-              <label className="text-xs font-bold text-gray-500 uppercase">Live Stock</label>
-              <input 
-                type="number" 
-                defaultValue={item.stock_count} 
-                id={`stock-${item.id}`}
-                className="w-full md:w-20 text-lg font-bold border border-gray-300 p-2 mt-1 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-              />
-            </div>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+        <div className="bg-indigo-50 rounded-xl p-6 border border-indigo-100">
+          <p className="text-indigo-600 font-semibold mb-1">Total Revenue Today</p>
+          <p className="text-5xl font-black text-indigo-900">₹{data.total_revenue}</p>
+        </div>
+        <div className="bg-blue-50 rounded-xl p-6 border border-blue-100">
+          <p className="text-blue-600 font-semibold mb-1">Total Orders Processed</p>
+          <p className="text-5xl font-black text-blue-900">{data.total_orders}</p>
+        </div>
+      </div>
 
-            <button 
-              onClick={() => {
-                const url = (document.getElementById(`url-${item.id}`) as HTMLInputElement).value;
-                const stock = parseInt((document.getElementById(`stock-${item.id}`) as HTMLInputElement).value);
-                updateItem(item.id, url, stock);
-              }}
-              className="w-full md:w-auto bg-black hover:bg-gray-800 text-white px-6 py-3 rounded-lg font-bold transition shadow-md"
-            >
-              Update DB
-            </button>
-          </div>
-        ))}
+      {/* Simple Pure CSS Bar Chart */}
+      <div>
+        <h3 className="text-lg font-bold text-gray-700 mb-6">Revenue Trend (Weekly)</h3>
+        <div className="flex items-end gap-4 h-48 mt-4">
+          {data.chart_data.map((day, index) => {
+            const heightPercentage = (day.revenue / maxRevenue) * 100;
+            return (
+              <div key={index} className="flex-1 flex flex-col items-center gap-2 group">
+                <div 
+                  className="w-full bg-indigo-500 rounded-t-md transition-all duration-500 hover:bg-indigo-400 relative"
+                  style={{ height: `${heightPercentage}%` }}
+                >
+                  {/* Tooltip on hover */}
+                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs py-1 px-2 rounded pointer-events-none transition-opacity whitespace-nowrap">
+                    ₹{Math.round(day.revenue)}
+                  </div>
+                </div>
+                <span className="text-sm font-medium text-gray-500">{day.name}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

@@ -1,12 +1,5 @@
 import { useState, useEffect } from 'react';
 
-interface Wallet {
-  student_id: string;
-  name: string;
-  balance: number;
-}
-
-// 1. New dynamic menu interface matching our Python DB
 interface MenuItem {
   id: string;
   name: string;
@@ -14,213 +7,254 @@ interface MenuItem {
   category: string;
   stock_count: number;
   is_special: boolean;
-  time_slot: string;
   image_url: string;
-}
-
-interface CartItem extends MenuItem {
-  qty: number;
+  calories: number;
+  diet_type: string;
+  spice_level: number;
+  ingredients: string;
+  is_bestseller: boolean;
+  is_new: boolean;
 }
 
 export default function CanteenPOS() {
-  const [wallet, setWallet] = useState<Wallet | null>(null);
   const [menu, setMenu] = useState<MenuItem[]>([]);
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [orderStatus, setOrderStatus] = useState<string | null>(null);
-  
-  const currentStudentId = "STU-2026-01";
+  const [cart, setCart] = useState<{item: MenuItem, qty: number}[]>([]);
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [aiInsight, setAiInsight] = useState<{recommendation: string, alert: string} | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
 
   useEffect(() => {
-    fetchWallet();
-    fetchMenu();
+    fetch('http://localhost:8000/api/menu')
+      .then(res => {
+        if (!res.ok) throw new Error("API not ok");
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) {
+          setMenu(data);
+        } else {
+          setMenu([]); 
+        }
+      })
+      .catch(err => {
+        console.error("Menu API Offline:", err);
+        setMenu([]);
+      });
   }, []);
 
-  const fetchWallet = async () => {
-    try {
-      const res = await fetch(`http://localhost:8000/api/wallet/${currentStudentId}`);
-      if (res.ok) setWallet(await res.json());
-    } catch (error) {
-      console.error("Failed to fetch wallet:", error);
-    }
-  };
-
-  // 2. Fetch the live SQLite data!
-  const fetchMenu = async () => {
-    try {
-      const res = await fetch(`http://localhost:8000/api/menu`);
-      if (res.ok) setMenu(await res.json());
-    } catch (error) {
-      console.error("Failed to fetch menu:", error);
-    }
-  };
-
   const addToCart = (item: MenuItem) => {
-    if (item.stock_count === 0) return; // Prevent adding sold out items
-    
     setCart(prev => {
-      const existing = prev.find(i => i.id === item.id);
+      const existing = prev.find(i => i.item.id === item.id);
       if (existing) {
-        // Prevent adding more than what is in stock
-        if (existing.qty >= item.stock_count) return prev;
-        return prev.map(i => i.id === item.id ? { ...i, qty: i.qty + 1 } : i);
+        return prev.map(i => i.item.id === item.id ? { ...i, qty: i.qty + 1 } : i);
       }
-      return [...prev, { ...item, qty: 1 }];
+      return [...prev, { item, qty: 1 }];
     });
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  const calculateTotal = () => cart.reduce((sum, i) => sum + (i.item.price * i.qty), 0);
 
-  const placeOrder = async () => {
-    if (cart.length === 0) return;
+  const handleCheckoutClick = async () => {
+    setShowCheckout(true);
+    setIsAiLoading(true);
+    
     try {
       const payload = {
-        student_id: currentStudentId,
-        items: cart.map(item => ({ name: item.name, qty: item.qty, price: item.price }))
+        items: cart.map(c => c.item.name),
+        total_amount: calculateTotal()
       };
+      
+      const res = await fetch('http://localhost:8000/api/ai/checkout-insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      setAiInsight(data);
+    } catch (err) {
+      console.error("AI Engine offline");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
+  const finalizeOrder = async () => {
+    const payload = {
+      student_id: "STU-2026-01",
+      items: cart.map(c => ({ name: c.item.name, qty: c.qty, price: c.item.price }))
+    };
+
+    try {
       const res = await fetch('http://localhost:8000/api/orders/place', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
+      
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
-        setOrderStatus(`✅ Order Placed! Token #${data.token_number}`);
+        alert(`Payment Successful! Your Token is #${data.token_number}`);
         setCart([]); 
-        fetchWallet(); 
-        fetchMenu(); // Refresh menu to instantly update the stock counts!
-        setTimeout(() => setOrderStatus(null), 4000);
+        setShowCheckout(false);
+        setAiInsight(null);
+        window.location.reload(); 
       } else {
-        const err = await res.json();
-        alert(`Checkout Failed: ${err.detail}`);
+        alert("Transaction Failed: " + data.detail);
       }
     } catch (error) {
-      alert("Network error connecting to backend.");
+      alert("Bank Server Offline");
     }
   };
 
-  // 3. Logic for the exact stock labels from the iTech Manual
-  const getStockLabel = (count: number) => {
-    if (count === 0) return <span className="text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded">Sold out</span>;
-    if (count <= 2) return <span className="text-xs font-bold text-orange-600 bg-orange-100 px-2 py-1 rounded animate-pulse">Getting over soon</span>;
-    if (count <= 10) return <span className="text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-1 rounded">Only a few left</span>;
-    return null; // Plenty in stock
+  const renderSpice = (level: number) => "🌶️".repeat(level);
+
+  const DietIcon = ({ type }: { type: string }) => {
+    const isVeg = type.toLowerCase() === 'veg' || type.toLowerCase() === 'vegan';
+    const color = isVeg ? 'border-green-600 text-green-600' : 'border-red-600 text-red-600';
+    return (
+      <div className={`w-4 h-4 border-2 flex items-center justify-center ${color} bg-white`}>
+        <div className={`w-2 h-2 rounded-full ${isVeg ? 'bg-green-600' : 'bg-red-600'}`}></div>
+      </div>
+    );
   };
 
-  const specialItem = menu.find(item => item.is_special);
-  const regularMenu = menu.filter(item => !item.is_special);
-
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mt-6">
-      <div className="flex justify-between items-center mb-6 border-b pb-4">
-        <h2 className="text-2xl font-extrabold text-gray-900">Campus Canteen</h2>
-        
-        {wallet ? (
-          <div className="bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl flex items-center gap-3">
-            <div className="text-right">
-              <p className="text-xs text-blue-600 font-bold uppercase tracking-wider">{wallet.name}</p>
-              <p className="text-sm font-mono text-gray-500">{wallet.student_id}</p>
-            </div>
-            <div className="text-2xl font-black text-blue-700">₹{wallet.balance}</div>
+    <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden relative mb-12">
+      <div className="bg-black text-white p-6 flex justify-between items-center">
+        <h2 className="text-2xl font-black tracking-tight">Live Menu</h2>
+        <div className="bg-white/20 px-4 py-2 rounded-full text-sm font-bold">
+          🛒 {cart.reduce((sum, i) => sum + i.qty, 0)} Items (₹{calculateTotal()})
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 p-6">
+        {menu.length === 0 && (
+          <div className="col-span-4 text-center py-10 font-bold text-red-500">
+            Cannot load menu. Is the Python backend running?
           </div>
-        ) : (
-          <span className="text-gray-400 font-bold animate-pulse">Syncing Wallet...</span>
         )}
-      </div>
+        {menu.map(item => (
+          <div key={item.id} className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition bg-gray-50 relative flex flex-col">
+            {item.is_bestseller && (
+              <span className="absolute top-3 left-3 bg-yellow-400 text-black text-xs font-black px-2 py-1 rounded shadow-sm z-10">BESTSELLER</span>
+            )}
+            {item.is_new && (
+              <span className="absolute top-3 left-3 bg-blue-500 text-white text-xs font-black px-2 py-1 rounded shadow-sm z-10">NEW</span>
+            )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {/* Left Side: Live Menu */}
-        <div className="md:col-span-2">
-          
-          {/* Today's Special Hero Card */}
-          {specialItem && (
-            <div className="mb-8 relative rounded-2xl overflow-hidden shadow-md group cursor-pointer" onClick={() => addToCart(specialItem)}>
-              <img src={specialItem.image_url} alt={specialItem.name} className="w-full h-48 object-cover group-hover:scale-105 transition duration-500" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex flex-col justify-end p-6">
-                <span className="bg-red-600 text-white text-xs font-black uppercase tracking-widest px-2 py-1 rounded w-max mb-2">Chef's Special</span>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <h3 className="text-3xl font-black text-white">{specialItem.name}</h3>
-                    <p className="text-gray-300 font-medium text-sm mt-1">{specialItem.category} • {specialItem.time_slot}</p>
-                  </div>
-                  <div className="text-right">
-                    {getStockLabel(specialItem.stock_count)}
-                    <p className="text-3xl font-black text-white mt-1">₹{specialItem.price}</p>
-                  </div>
+            <img src={item.image_url} alt={item.name} className="w-full h-40 object-cover" />
+            
+            <div className="p-4 flex flex-col flex-grow">
+              <div className="flex justify-between items-start mb-1">
+                <div className="flex items-start gap-2">
+                  <div className="mt-1"><DietIcon type={item.diet_type} /></div>
+                  <h3 className="font-bold text-lg text-gray-900 leading-tight">{item.name}</h3>
                 </div>
+                <p className="font-black text-green-600 text-lg">₹{item.price}</p>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-gray-500 mb-2 font-medium flex-wrap">
+                <span className="bg-gray-200 px-2 py-0.5 rounded">🔥 {item.calories} kcal</span>
+                {item.spice_level > 0 && <span>{renderSpice(item.spice_level)}</span>}
+              </div>
+              
+              <p className="text-xs text-gray-400 mb-4 line-clamp-2 flex-grow" title={item.ingredients}>
+                {item.ingredients}
+              </p>
+
+              <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-200">
+                <p className="text-xs font-bold text-gray-500">Stock: {item.stock_count}</p>
+                <button 
+                  onClick={() => addToCart(item)}
+                  disabled={item.stock_count === 0}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm transition shadow-sm ${
+                    item.stock_count > 0 ? 'bg-black text-white hover:bg-gray-800 active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  {item.stock_count > 0 ? '+ Add' : 'Sold Out'}
+                </button>
               </div>
             </div>
-          )}
-
-          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3 border-b pb-2">Live Menu</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {regularMenu.map(item => (
-              <button 
-                key={item.id}
-                onClick={() => addToCart(item)}
-                disabled={item.stock_count === 0}
-                className={`p-0 border rounded-xl flex flex-col overflow-hidden hover:shadow-md transition text-left ${item.stock_count === 0 ? 'opacity-50 grayscale cursor-not-allowed border-gray-200' : 'border-gray-200 hover:border-blue-300'}`}
-              >
-                <img src={item.image_url} alt={item.name} className="w-full h-32 object-cover" />
-                <div className="p-4 w-full">
-                  <div className="flex justify-between items-start mb-1">
-                    <p className="font-bold text-gray-900 text-lg">{item.name}</p>
-                    <p className="text-blue-600 font-black text-lg">₹{item.price}</p>
-                  </div>
-                  <div className="flex justify-between items-center mt-2">
-                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wide">{item.category}</p>
-                    {getStockLabel(item.stock_count)}
-                  </div>
-                </div>
-              </button>
-            ))}
           </div>
-        </div>
+        ))}
+      </div>
 
-        {/* Right Side: Live Cart & Checkout */}
-        <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 flex flex-col justify-between h-max sticky top-6">
+      {cart.length > 0 && (
+        <div className="border-t border-gray-200 p-6 bg-gray-50 flex justify-between items-center sticky bottom-0 z-20 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)]">
           <div>
-            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3 border-b pb-2">Your Tray</h3>
-            
-            {cart.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center mt-8 italic">Tray is empty</p>
-            ) : (
-              <div className="space-y-3 mb-4">
-                {cart.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-gray-700">{item.qty}x {item.name}</span>
-                    <span className="text-gray-900 font-medium">₹{item.price * item.qty}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <p className="text-sm font-bold text-gray-500 uppercase tracking-wide">Total Order</p>
+            <p className="text-3xl font-black text-gray-900">₹{calculateTotal()}</p>
           </div>
+          <button 
+            onClick={handleCheckoutClick}
+            className="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-xl font-black text-lg transition shadow-lg transform hover:scale-105 active:scale-95"
+          >
+            Checkout (₹{calculateTotal()})
+          </button>
+        </div>
+      )}
 
-          <div className="pt-4 border-t border-gray-200 mt-auto">
-            <div className="flex justify-between items-center mb-4">
-              <span className="font-bold text-gray-600">Total Amount</span>
-              <span className="text-2xl font-black text-gray-900">₹{cartTotal}</span>
+      {showCheckout && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-gray-900 text-white p-5 text-center relative">
+              <h3 className="text-xl font-black">Scan to Pay</h3>
+              <p className="text-gray-400 text-sm mt-1">PSG iTech Canteen</p>
+            </div>
+
+            <div className="p-6 flex flex-col items-center">
+              
+              <div className="w-full mb-6">
+                {isAiLoading ? (
+                  <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl flex items-center gap-3 animate-pulse">
+                    <span className="text-xl">🤖</span>
+                    <p className="text-xs font-bold text-blue-700">AI Recommender analyzing your cart...</p>
+                  </div>
+                ) : aiInsight && aiInsight.recommendation !== "No recommendation" ? (
+                  <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl flex items-start gap-3 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-purple-500/10 rounded-full blur-xl"></div>
+                    <span className="text-2xl relative z-10">✨</span>
+                    <div className="relative z-10">
+                      <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">AI Smart Combo</p>
+                      <p className="text-sm font-bold text-gray-800">You should add: <span className="text-purple-700">{aiInsight.recommendation}</span></p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="text-center mb-6">
+                <p className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-1">Amount Due</p>
+                <p className="text-4xl font-black text-gray-900">₹{calculateTotal()}</p>
+              </div>
+
+              <div className="bg-white p-2 rounded-2xl shadow-inner border-2 border-gray-100 mb-6 relative">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=canteen@psgitech&pn=PSG_Canteen&am=${calculateTotal()}`} 
+                  alt="Payment QR" 
+                  className="w-48 h-48"
+                />
+              </div>
+
+              <div className="w-full space-y-3">
+                <button 
+                  onClick={finalizeOrder}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition shadow-md flex items-center justify-center gap-2"
+                >
+                  <span>Simulate Payment Success</span>
+                </button>
+                <button 
+                  onClick={() => setShowCheckout(false)}
+                  className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-bold transition"
+                >
+                  Cancel Order
+                </button>
+              </div>
             </div>
             
-            <button 
-              onClick={placeOrder}
-              disabled={cart.length === 0}
-              className={`w-full py-3 rounded-xl font-bold transition flex justify-center items-center gap-2 ${
-                cart.length > 0 
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md' 
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              Confirm & Pay ➔
-            </button>
-            
-            {orderStatus && (
-              <p className="mt-3 text-center text-green-600 font-bold text-sm animate-bounce">{orderStatus}</p>
-            )}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
+
